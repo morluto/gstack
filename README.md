@@ -120,9 +120,11 @@ The browser **persists between calls**. Navigate once, then query as many times 
 
 ## Install
 
-Just clone it. Claude handles the rest on first use (installs dependencies, compiles the binary).
+Just clone it. Claude handles the rest on first use (installs dependencies, compiles the binary, ~10 seconds).
 
 ### Option A: Project-level (recommended for teams)
+
+Run this from the root of your git project:
 
 ```bash
 git submodule add https://github.com/garrytan/gstack-browse.git .claude/skills/gstack-browse
@@ -130,13 +132,15 @@ git submodule add https://github.com/garrytan/gstack-browse.git .claude/skills/g
 
 Commit the submodule. Everyone who clones your repo gets the browser.
 
+**Worktrees**: New worktrees need `git submodule update --init .claude/skills/gstack-browse` to populate the directory. Claude's auto-setup handles this — it detects an empty submodule and runs the init for you.
+
 ### Option B: User-level (personal)
 
 ```bash
 git clone https://github.com/garrytan/gstack-browse.git ~/.claude/skills/gstack-browse
 ```
 
-That's it. Next time Claude needs to browse a page, it'll detect the skill, ask to run setup (~10 seconds), and you're live.
+Available across all your projects. No per-repo setup.
 
 **Prerequisite**: [Bun](https://bun.sh/) v1.0+ (Claude will tell you if it's missing).
 

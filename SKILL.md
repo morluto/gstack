@@ -20,25 +20,40 @@ Every subsequent call: ~100-200ms. Auto-shuts down after 30 min idle.
 
 ## SETUP (run this check BEFORE any browse command)
 
-Before using any browse command, check if the binary exists:
+Before using any browse command, find the skill and check if the binary exists:
 
 ```bash
-test -x ~/.claude/skills/gstack-browse/dist/browse && echo "READY" || echo "NEEDS_SETUP"
+# Check project-level first, then user-level
+if test -x .claude/skills/gstack-browse/dist/browse; then
+  echo "READY_PROJECT"
+elif test -x ~/.claude/skills/gstack-browse/dist/browse; then
+  echo "READY_USER"
+else
+  echo "NEEDS_SETUP"
+fi
 ```
 
+Set `B` to whichever path is READY and use it for all commands. Prefer project-level if both exist.
+
 If `NEEDS_SETUP`:
-1. Tell the user: "gstack-browse needs a one-time setup (bun install + compile CLI binary). This takes ~10 seconds. OK to proceed?" Then STOP and wait for their response.
-2. If they approve, run:
+1. Tell the user: "gstack-browse needs a one-time setup (~10 seconds). OK to proceed?" Then STOP and wait for their response.
+2. If they approve, determine the skill directory (project-level `.claude/skills/gstack-browse` or user-level `~/.claude/skills/gstack-browse`) and run:
 ```bash
-cd ~/.claude/skills/gstack-browse && bun install && bun run build
+SKILL_DIR=<whichever path exists>
+
+# If submodule exists but isn't initialized (empty dir, no package.json):
+test -f "$SKILL_DIR/package.json" || git submodule update --init "$SKILL_DIR"
+
+# Install and build
+cd "$SKILL_DIR" && bun install && bun run build
 ```
 3. If `bun` is not installed, tell the user to install it: `curl -fsSL https://bun.sh/install | bash`
 
-Once setup is done, it never needs to run again (the compiled binary persists).
+Once setup is done, it never needs to run again (the compiled binary persists across worktrees that share the same checkout).
 
 ## IMPORTANT
 
-- Use `~/.claude/skills/gstack-browse/dist/browse` (compiled binary) via Bash.
+- Use the compiled binary via Bash: `.claude/skills/gstack-browse/dist/browse` (project) or `~/.claude/skills/gstack-browse/dist/browse` (user).
 - NEVER use `mcp__claude-in-chrome__*` tools. They are slow and unreliable.
 - The browser persists between calls — cookies, tabs, and state carry over.
 - The server auto-starts on first command. No setup needed.
