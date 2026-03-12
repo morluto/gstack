@@ -25,6 +25,14 @@ function extractRef(snapshot: string, predicate: (line: string) => boolean): str
   return `@${refMatch![1]}`;
 }
 
+function extractRefNumbers(snapshot: string): number[] {
+  return snapshot
+    .split('\n')
+    .map((line) => line.match(/@e(\d+)/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .map((match) => Number(match[1]));
+}
+
 beforeAll(async () => {
   testServer = startTestServer(0);
   baseUrl = testServer.url;
@@ -112,6 +120,15 @@ describe('Snapshot', () => {
     const result = await handleMetaCommand('snapshot', ['-i'], bm, shutdown);
     expect(result).toContain('[button]');
     expect(result).toContain('Say "Hello"');
+  });
+
+  test('snapshot emits contiguous refs when skipped nodes are not materialized', async () => {
+    await handleWriteCommand('goto', [baseUrl + '/snapshot.html'], bm);
+    const result = await handleMetaCommand('snapshot', [], bm, shutdown);
+    const refs = extractRefNumbers(result);
+
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs).toEqual(Array.from({ length: refs.length }, (_, index) => index + 1));
   });
 });
 

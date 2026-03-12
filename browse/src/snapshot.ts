@@ -168,8 +168,6 @@ export async function handleSnapshot(
     // Compact filter: skip elements with no name and no inline content that aren't interactive
     if (opts.compact && !isInteractive && !node.name && !node.children) continue;
 
-    // Assign ref
-    const ref = `e${refCounter++}`;
     const indent = '  '.repeat(depth);
 
     // Build Playwright locator
@@ -207,6 +205,7 @@ export async function handleSnapshot(
     }
     if (!handle) continue;
 
+    const ref = `e${refCounter++}`;
     refMap.set(ref, handle);
 
     // Format output line
