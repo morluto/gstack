@@ -1,17 +1,17 @@
 /**
  * Snapshot command — accessibility tree with ref-based element selection
  *
- * Architecture (Locator map — no DOM mutation):
+ * Architecture (frozen handle map — no DOM mutation):
  *   1. page.locator(scope).ariaSnapshot() → YAML-like accessibility tree
  *   2. Parse tree, assign refs @e1, @e2, ...
  *   3. Build Playwright Locator for each ref (getByRole + nth)
- *   4. Store Map<string, Locator> on BrowserManager
+ *   4. Resolve each locator to an ElementHandle and store it per tab
  *   5. Return compact text output with refs prepended
  *
- * Later: "click @e3" → look up Locator → locator.click()
+ * Later: "click @e3" → look up frozen handle → handle.click()
  */
 
-import type { Page, Locator } from 'playwright';
+import type { ElementHandle, Locator } from 'playwright';
 import type { BrowserManager } from './browser-manager';
 
 // Roles considered "interactive" for the -i flag
@@ -36,6 +36,10 @@ interface ParsedNode {
   props: string;      // e.g., "[level=1]"
   children: string;   // inline text content after ":"
   rawLine: string;
+}
+
+function unescapeQuotedText(value: string): string {
+  return value.replace(/\\\\/g, '\\').replace(/\\"/g, '"');
 }
 
 /**
@@ -83,7 +87,7 @@ export function parseSnapshotArgs(args: string[]): SnapshotOptions {
  */
 function parseLine(line: string): ParsedNode | null {
   // Match: (indent)(- )(role)( "name")?( [props])?(: inline)?
-  const match = line.match(/^(\s*)-\s+(\w+)(?:\s+"([^"]*)")?(?:\s+(\[.*?\]))?\s*(?::\s*(.*))?$/);
+  const match = line.match(/^(\s*)-\s+(\w+)(?:\s+"((?:[^"\\]|\\.)*)")?(?:\s+(\[.*?\]))?\s*(?::\s*(.*))?$/);
   if (!match) {
     // Skip metadata lines like "- /url: /a"
     return null;
@@ -91,7 +95,7 @@ function parseLine(line: string): ParsedNode | null {
   return {
     indent: match[1].length,
     role: match[2],
-    name: match[3] ?? null,
+    name: match[3] ? unescapeQuotedText(match[3]) : null,
     props: match[4] || '',
     children: match[5]?.trim() || '',
     rawLine: line,
@@ -126,7 +130,7 @@ export async function handleSnapshot(
 
   // Parse the ariaSnapshot output
   const lines = ariaText.split('\n');
-  const refMap = new Map<string, Locator>();
+  const refMap = new Map<string, ElementHandle<Node>>();
   const output: string[] = [];
   let refCounter = 1;
 
@@ -142,6 +146,11 @@ export async function handleSnapshot(
     roleNameCounts.set(key, (roleNameCounts.get(key) || 0) + 1);
   }
 
+  function markRoleNameSeen(node: ParsedNode) {
+    const key = `${node.role}:${node.name || ''}`;
+    roleNameSeen.set(key, (roleNameSeen.get(key) || 0) + 1);
+  }
+
   // Second pass: assign refs and build locators
   for (const line of lines) {
     const node = parseLine(line);
@@ -151,21 +160,25 @@ export async function handleSnapshot(
     const isInteractive = INTERACTIVE_ROLES.has(node.role);
 
     // Depth filter
-    if (opts.depth !== undefined && depth > opts.depth) continue;
+    if (opts.depth !== undefined && depth > opts.depth) {
+      // Skipped nodes still occupy nth() slots for later same-name matches.
+      markRoleNameSeen(node);
+      continue;
+    }
 
     // Interactive filter: skip non-interactive but still count for locator indices
     if (opts.interactive && !isInteractive) {
       // Still track for nth() counts
-      const key = `${node.role}:${node.name || ''}`;
-      roleNameSeen.set(key, (roleNameSeen.get(key) || 0) + 1);
+      markRoleNameSeen(node);
       continue;
     }
 
     // Compact filter: skip elements with no name and no inline content that aren't interactive
-    if (opts.compact && !isInteractive && !node.name && !node.children) continue;
+    if (opts.compact && !isInteractive && !node.name && !node.children) {
+      markRoleNameSeen(node);
+      continue;
+    }
 
-    // Assign ref
-    const ref = `e${refCounter++}`;
     const indent = '  '.repeat(depth);
 
     // Build Playwright locator
@@ -190,7 +203,21 @@ export async function handleSnapshot(
       locator = locator.nth(seenIndex);
     }
 
-    refMap.set(ref, locator);
+    // Some accessibility nodes (for example structural text nodes) do not map
+    // cleanly back to a single DOM element. Skip those instead of stalling the
+    // whole snapshot.
+    let handle: ElementHandle<Node> | null = null;
+    try {
+      const count = await locator.count();
+      if (count !== 1) continue;
+      handle = await locator.elementHandle({ timeout: 100 });
+    } catch {
+      continue;
+    }
+    if (!handle) continue;
+
+    const ref = `e${refCounter++}`;
+    refMap.set(ref, handle);
 
     // Format output line
     let outputLine = `${indent}@${ref} [${node.role}]`;
