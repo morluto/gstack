@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.5.1] - 2026-03-29 — Gitignore .factory
+
+### Changed
+
+- **Stop tracking `.factory/` directory.** Generated Factory Droid skill files are now gitignored, same as `.claude/skills/` and `.agents/`. Removes 29 generated SKILL.md files from the repo. The `setup` script and `bun run build` regenerate these on demand.
+
 ## [0.13.5.0] - 2026-03-29 — Factory Droid Compatibility
 
 gstack now works with Factory Droid. Type `/qa` in Droid and get the same 29 skills you use in Claude Code. This makes gstack the first skill library that works across Claude Code, Codex, and Factory Droid.
