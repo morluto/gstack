@@ -1,0 +1,110 @@
+name: E2E Evals Report
+on:
+  workflow_run:
+    workflows: ["E2E Evals"]
+    types: [completed]
+
+concurrency:
+  group: evals-report-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubicloud-standard-2
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download all eval artifacts
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: eval-*
+          path: /tmp/eval-results
+          merge-multiple: true
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Resolve the PR number from the workflow run
+          PR_NUMBER=$(gh api "repos/${{ github.repository }}/pulls?head=${{ github.event.workflow_run.head_repository.owner.login }}:${{ github.event.workflow_run.head_branch }}" --jq '.[0].number')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "Could not find PR for branch ${{ github.event.workflow_run.head_branch }}"
+            exit 0
+          fi
+
+          # shellcheck disable=SC2086,SC2059
+          RESULTS=$(find /tmp/eval-results -name '*.json' 2>/dev/null | sort)
+          if [ -z "$RESULTS" ]; then
+            echo "No eval results found"
+            exit 0
+          fi
+
+          TOTAL=0; PASSED=0; FAILED=0; COST="0"
+          SUITE_LINES=""
+          for f in $RESULTS; do
+            if ! jq -e '.total_tests' "$f" >/dev/null 2>&1; then
+              echo "Skipping malformed JSON: $f"
+              continue
+            fi
+            T=$(jq -r '.total_tests // 0' "$f")
+            P=$(jq -r '.passed // 0' "$f")
+            F=$(jq -r '.failed // 0' "$f")
+            C=$(jq -r '.total_cost_usd // 0' "$f")
+            TIER=$(jq -r '.tier // "unknown"' "$f")
+            [ "$T" -eq 0 ] && continue
+            TOTAL=$((TOTAL + T))
+            PASSED=$((PASSED + P))
+            FAILED=$((FAILED + F))
+            COST=$(echo "$COST + $C" | bc)
+            STATUS_ICON="✅"
+            [ "$F" -gt 0 ] && STATUS_ICON="❌"
+            SUITE_LINES="${SUITE_LINES}| ${TIER} | ${P}/${T} | ${STATUS_ICON} | \$${C} |\n"
+          done
+
+          STATUS="✅ PASS"
+          [ "$FAILED" -gt 0 ] && STATUS="❌ FAIL"
+
+          BODY="## E2E Evals: ${STATUS}
+
+          **${PASSED}/${TOTAL}** tests passed | **\$${COST}** total cost | **12 parallel runners**
+
+          | Suite | Result | Status | Cost |
+          |-------|--------|--------|------|
+          $(echo -e "$SUITE_LINES")
+
+          ---
+          *12x ubicloud-standard-2 (Docker: pre-baked toolchain + deps) | wall clock ≈ slowest suite*"
+
+          if [ "$FAILED" -gt 0 ]; then
+            FAILURES=""
+            for f in $RESULTS; do
+              if ! jq -e '.failed' "$f" >/dev/null 2>&1; then continue; fi
+              F=$(jq -r '.failed // 0' "$f")
+              [ "$F" -eq 0 ] && continue
+              FAILS=$(jq -r '.tests[] | select(.passed == false) | "- ❌ \(.name): \(.exit_reason // "unknown")"' "$f" 2>/dev/null || echo "- ⚠️ $(basename "$f"): parse error")
+              FAILURES="${FAILURES}${FAILS}\n"
+            done
+            BODY="${BODY}
+
+          ### Failures
+          $(echo -e "$FAILURES")"
+          fi
+
+          # Update existing comment or create new one
+          COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("## E2E Evals")) | .id' | tail -1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \
+              -X PATCH -f body="$BODY"
+          else
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+          fi
