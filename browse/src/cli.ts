@@ -440,6 +440,13 @@ async function sendCommand(state: ServerState, command: string, args: string[], 
 async function main() {
   const args = process.argv.slice(2);
 
+  // MCP mode: run the MCP stdio server
+  if (args[0] === '--mcp') {
+    const { main: mcpMain } = await import('./mcp-server');
+    await mcpMain();
+    return;
+  }
+
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     console.log(`gstack browse — Fast headless browser for AI coding agents
 
