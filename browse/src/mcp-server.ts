@@ -34,13 +34,16 @@ export async function main() {
   );
 
   // Register every browse command as an MCP tool
+  // Use registerTool() (not tool()) because it properly handles full ZodObject
+  // schemas — the deprecated tool() overload has a heuristic check that rejects
+  // Zod schemas with nested object values.
   for (const [cmd, entry] of Object.entries(COMMAND_SCHEMAS)) {
-    server.tool(
+    server.registerTool(
       `browse_${cmd}`,
-      entry.description,
-      // zodToJsonSchema would give us the input schema, but we pass the raw zod
-      // schema so the MCP SDK can validate for us
-      entry.schema,
+      {
+        description: entry.description,
+        inputSchema: entry.schema,
+      },
       async (params: Record<string, unknown>) => {
         try {
           const result = await runCommand(state, cmd, params);
