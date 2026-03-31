@@ -726,8 +726,20 @@ if [ "$INSTALL_FACTORY" -eq 1 ]; then
   mkdir -p "$FACTORY_SKILLS"
   create_factory_runtime_root "$SOURCE_GSTACK_DIR" "$FACTORY_GSTACK"
   link_factory_skill_dirs "$SOURCE_GSTACK_DIR" "$FACTORY_SKILLS"
+
+  # Write ~/.factory/mcp.json to register the browse MCP server
+  mkdir -p "$HOME/.factory"
+  cat > "$HOME/.factory/mcp.json" << 'MCPJSON'
+{
+  "command": "browse",
+  "args": ["--mcp"],
+  "env": {}
+}
+MCPJSON
+
   echo "gstack ready (factory)."
   echo "  browse: $BROWSE_BIN"
+  echo "  mcp: ~/.factory/mcp.json"
   echo "  factory skills: $FACTORY_SKILLS"
 fi
 
